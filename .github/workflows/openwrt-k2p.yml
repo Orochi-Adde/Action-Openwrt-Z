@@ -55,11 +55,23 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 步骤六：加载自定义配置与脚本
+    # 步骤六：加载自定义配置与脚本（修补逻辑防 exit code 1）
       - name: Apply Configuration & Custom Scripts
         run: |
-          [ -f .config ] && cp .config openwrt/.config
-          [ -f diy.sh ] && chmod +x diy.sh && ./diy.sh openwrt
+          if [ -f .config ]; then
+            cp .config openwrt/.config
+            echo "发现 .config 文件，已成功复制！"
+          else
+            echo "未发现 .config 文件，将使用 OpenWrt 默认配置。"
+          fi
+
+          if [ -f diy.sh ]; then
+            chmod +x diy.sh
+            ./diy.sh openwrt
+            echo "diy.sh 执行完毕！"
+          else
+            echo "未发现 diy.sh 脚本，跳过自定义脚本处理。"
+          fi
 
       # 步骤七：生成默认配置并下载依赖（同时启用现代构建选项）
       - name: Download Package Dependencies & Configure
