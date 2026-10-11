@@ -1,4 +1,4 @@
-name: K2P OpenWrt Build (Main Branch & Modern Toolchain) 
+name: K2P OpenWrt Build (Main Branch & Ccache)
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04 # 使用现代化的 Ubuntu 24.04 编译环境
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Repository
@@ -28,7 +28,7 @@ jobs:
           docker-images: false
           swap-storage: false
 
-      # 步骤三：安装 OpenWrt 官方主分支推荐的现代编译依赖
+      # 步骤三：安装编译依赖
       - name: Install Dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -43,19 +43,28 @@ jobs:
             pkg-config python3-dev subversion texinfo time u-boot-tools xsltproc xxd zstd
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      # 步骤四：克隆主分支源码
+      # 步骤四：配置 Ccache 缓存持久化（跨编译保留，严格限制在 2GB 以内防爆仓）
+      - name: Restore Ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+
+      # 步骤五：克隆源码
       - name: Clone Source Code
         run: |
           git clone --depth 1 https://github.com/openwrt/openwrt.git -b ${{ github.event.inputs.branch }} openwrt
 
-      # 步骤五：更新和安装 Feeds
+      # 步骤六：更新和安装 Feeds
       - name: Update Feeds
         run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-    # 步骤六：加载自定义配置与脚本（修补逻辑防 exit code 1）
+      # 步骤七：加载自定义配置与脚本（带安全容错）
       - name: Apply Configuration & Custom Scripts
         run: |
           if [ -f .config ]; then
@@ -73,26 +82,35 @@ jobs:
             echo "未发现 diy.sh 脚本，跳过自定义脚本处理。"
           fi
 
-      # 步骤七：生成默认配置并下载依赖（同时启用现代构建选项）
+      # 步骤八：配置编译选项、初始化 Ccache 并下载依赖
       - name: Download Package Dependencies & Configure
         run: |
           cd openwrt
           make defconfig
-          # 针对主分支编译，提前下载所有软件包
+          
+          # 核心：初始化 ccache 并将最大体积锁死在 2GB，防止撑爆 GitHub 缓存配额
+          export CCACHE_DIR=~/.ccache
+          ccache -M 2G
+          ccache -s
+          
           make download -j8
 
-      # 步骤八：多线程正式编译固件（利用服务器所有核心加速）
+      # 步骤九：多线程正式编译固件
       - name: Compile Firmware
         run: |
           cd openwrt
           echo "Using $(nproc) threads for compilation."
-          # 输出当前时间变量供后续打包使用
+          
+          # 确保编译时全局启用 ccache 环境变量
+          export CCACHE_DIR=~/.ccache
+          export FORCE_UNSAFE_CONFIGURE=1
+          
           echo "FILE_DATE=$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           make -j$(nproc) V=s
 
-      # 步骤九：打包编译好的固件并上传到网页端下载
+      # 步骤十：打包编译好的固件并上传（已修正为正确的 ramips 路径）
       - name: Organize And Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: OpenWrt-K2P-Master-${{ env.FILE_DATE }}
-          path: openwrt/bin/targets/ralink/mt7621/
+          path: openwrt/bin/targets/ramips/mt7621/
