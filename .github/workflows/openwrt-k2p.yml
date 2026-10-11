@@ -1,4 +1,4 @@
-name: Custom OpenWrt Build (Main Branch & Modern Toolchain) - K2P
+name: - K2P OpenWrt Build (Main Branch & Modern Toolchain) - 
 
 on:
   workflow_dispatch:
