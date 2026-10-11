@@ -5,7 +5,8 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: '选择编译分支 (例如 master 或 openwrt-23.05)'
+        description: 'master'
+        # 选择编译分支 (例如 master 或 openwrt-23.05)
         required: true
         default: 'master'
 
