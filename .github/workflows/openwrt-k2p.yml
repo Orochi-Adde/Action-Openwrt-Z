@@ -1,25 +1,22 @@
-name: Custom OpenWrt Build for K2P
+name: Custom OpenWrt Build (Main Branch & Modern Toolchain) - K2P
 
-# 1. 触发方式：支持手动点击运行，也可以设置定时触发
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'master'
-        # 选择编译分支 (例如 master 或 openwrt-23.05)
+        description: '选择编译分支 (主分支建议填 master)'
         required: true
         default: 'master'
 
 jobs:
   build:
-    runs-on: ubuntu-22.04 # 使用稳定高效的 Ubuntu 22.04 环境
+    runs-on: ubuntu-24.04 # 使用现代化的 Ubuntu 24.04 编译环境
 
     steps:
-      # 步骤一：检出你自己的仓库代码（用来读取你可能写好的 diy 脚本）
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 步骤二：给 GitHub 虚拟机清理出足够的硬盘空间（至关重要！防爆盘）
+      # 步骤二：清理磁盘空间防止爆盘
       - name: Free Up Disk Space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -31,48 +28,45 @@ jobs:
           docker-images: false
           swap-storage: false
 
-      # 步骤三：安装编译 OpenWrt 所需的系统级依赖工具链
+      # 步骤三：安装 OpenWrt 官方主分支推荐的现代编译依赖
       - name: Install Dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-upx libfuse-dev ack antlr3 asciidoc autoconf automake autopoint binutils bison \
-            bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib \
-            g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev \
-            libgmp3-dev liblzo2-dev libncurses5-dev libltdl-dev libssl-dev libtool lrzsz mkisofs \
-            nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply \
-            python3-docutils qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo \
-            uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+            build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget \
+            bc binutils-gold ccache ecj fastjar libbsd-dev libelf-dev liblzma-dev \
+            liblzo2-dev libtool mtd-utils meson mold ninja-build pbzip2 pigz \
+            pkg-config python3-dev subversion texinfo time u-boot-tools xsltproc xxd zstd
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      # 步骤四：拉取官方（或未来改成 ImmortalWrt）源码
+      # 步骤四：克隆主分支源码
       - name: Clone Source Code
         run: |
           git clone --depth 1 https://github.com/openwrt/openwrt.git -b ${{ github.event.inputs.branch }} openwrt
 
-      # 步骤五：更新和安装 Feeds 插件包
+      # 步骤五：更新和安装 Feeds
       - name: Update Feeds
         run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 步骤六：加载 K2P 的硬件配置文件与自定义脚本
+      # 步骤六：加载自定义配置与脚本
       - name: Apply Configuration & Custom Scripts
         run: |
-          # 如果你在仓库里放了自定义的配置文件，直接覆盖过去
           [ -f .config ] && cp .config openwrt/.config
-          
-          # 执行你自己的微调脚本（比如修改默认 IP 等）
           [ -f diy.sh ] && chmod +x diy.sh && ./diy.sh openwrt
 
-      # 步骤七：生成默认配置并下载所有依赖源码（防编译中途断网）
-      - name: Download Package Dependencies
+      # 步骤七：生成默认配置并下载依赖（同时启用现代构建选项）
+      - name: Download Package Dependencies & Configure
         run: |
           cd openwrt
           make defconfig
+          # 针对主分支编译，提前下载所有软件包
           make download -j8
 
       # 步骤八：多线程正式编译固件（利用服务器所有核心加速）
@@ -80,13 +74,13 @@ jobs:
         run: |
           cd openwrt
           echo "Using $(nproc) threads for compilation."
-          make -j$(nproc) V=s
-          # 生成当前时间变量并存入 GitHub 环境变量
+          # 输出当前时间变量供后续打包使用
           echo "FILE_DATE=$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
+          make -j$(nproc) V=s
 
       # 步骤九：打包编译好的固件并上传到网页端下载
       - name: Organize And Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OpenWrt-K2P-Official-${{ env.FILE_DATE }}
+          name: OpenWrt-K2P-Master-${{ env.FILE_DATE }}
           path: openwrt/bin/targets/ralink/mt7621/
