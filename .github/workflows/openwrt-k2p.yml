@@ -43,19 +43,19 @@ jobs:
             pkg-config python3-dev subversion texinfo time u-boot-tools xsltproc xxd zstd
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      # 步骤四：配置 Ccache 缓存持久化（跨编译保留，严格限制在 2GB 以内防爆仓）
+      # 步骤四：配置 Ccache 缓存持久化（使用分支前缀提高命中率，限制 2GB）
       - name: Restore Ccache
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-ccache-${{ github.event.inputs.branch }}
           restore-keys: |
             ${{ runner.os }}-ccache-
 
-      # 步骤五：克隆源码
+      # 步骤五：克隆源码（浅克隆加速）
       - name: Clone Source Code
         run: |
-          git clone --depth 1 https://github.com/openwrt/openwrt.git -b ${{ github.event.inputs.branch }} openwrt
+          git clone --depth 1 --single-branch -b ${{ github.event.inputs.branch }} https://github.com/openwrt/openwrt.git openwrt
 
       # 步骤六：更新和安装 Feeds
       - name: Update Feeds
@@ -82,35 +82,52 @@ jobs:
             echo "未发现 diy.sh 脚本，跳过自定义脚本处理。"
           fi
 
-      # 步骤八：配置编译选项、初始化 Ccache 并下载依赖
+      # 步骤八：配置编译选项、初始化 Ccache 并多线程预下载依赖
       - name: Download Package Dependencies & Configure
         run: |
           cd openwrt
           make defconfig
           
-          # 核心：初始化 ccache 并将最大体积锁死在 2GB，防止撑爆 GitHub 缓存配额
+          # 初始化 ccache 并锁死 2GB 限制
           export CCACHE_DIR=~/.ccache
           ccache -M 2G
           ccache -s
           
-          make download -j8
+          # 开启全核并行预下载，把下载速度拉满
+          make download -j$(nproc)
 
-      # 步骤九：多线程正式编译固件
+      # 步骤九：多线程正式编译固件（去除 V=s 提高磁盘 I/O 效率）
       - name: Compile Firmware
         run: |
           cd openwrt
           echo "Using $(nproc) threads for compilation."
           
-          # 确保编译时全局启用 ccache 环境变量
           export CCACHE_DIR=~/.ccache
           export FORCE_UNSAFE_CONFIGURE=1
           
           echo "FILE_DATE=$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
-          make -j$(nproc) V=s
+          
+          # 移除烦人的 V=s 详细刷屏，让 CPU 和磁盘全力冲刺编译
+          make -j$(nproc)
 
-      # 步骤十：打包编译好的固件并上传（已修正为正确的 ramips 路径）
+      # 步骤十：排错调试 —— 打印 bin/targets 目录下的所有文件结构
+      - name: Debug - List Generated Files
+        run: |
+          echo "========== 正在打印编译产物目录结构 =========="
+          if [ -d "openwrt/bin/targets" ]; then
+            find openwrt/bin/targets/ -type f -exec ls -lh {} +
+          else
+            echo "警告：openwrt/bin/targets 目录不存在，说明编译中途报错！"
+          fi
+          echo "=============================================="
+
+      # 步骤十一：使用通配符打包上传所有固件
       - name: Organize And Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: OpenWrt-K2P-Master-${{ env.FILE_DATE }}
-          path: openwrt/bin/targets/ramips/mt7621/
+          path: |
+            openwrt/bin/targets/**/*.bin
+            openwrt/bin/targets/**/*.img
+            openwrt/bin/targets/**/config.buildinfo
+            openwrt/bin/targets/**/profiles.json
