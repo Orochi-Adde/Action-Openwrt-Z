@@ -7,6 +7,9 @@ sed -i '/video/d' feeds.conf.default
 # 2. 如果已经拉取下来了，直接暴力删除对应的 feeds 文件夹
 rm -rf feeds/video
 rm -rf package/feeds/video
+# 暴力清除有循环依赖风险的垃圾插件目录
+rm -rf feeds/packages/net/weechat
+rm -rf feeds/packages/sound/squeezelite
 
 echo "正在写入 LuCI 网页后台、中文包及常用网络组件..."
 cat >> .config << 'EOF'
