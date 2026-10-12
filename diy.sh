@@ -19,6 +19,9 @@ CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
 CONFIG_PACKAGE_luci-i18n-network-zh-cn=y
+# 确保开启系统包管理器 opkg
+CONFIG_PACKAGE_opkg=y
+CONFIG_LUCI_LANG_zh_Hans=y
 
 # --- USB 基础控制器与手机/网卡共享驱动 ---
 CONFIG_PACKAGE_kmod-usb-core=y
