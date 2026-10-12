@@ -51,7 +51,12 @@ jobs:
             pkg-config python3-dev subversion texinfo time u-boot-tools xsltproc xxd zstd
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      # 步骤四：动态缓存策略（如果是 clean 模式则直接跳过恢复，实现强行清空）
+      # 步骤四：克隆源码
+      - name: Clone Source Code
+        run: |
+          git clone --depth 1 --single-branch -b ${{ github.event.inputs.branch }} https://github.com/openwrt/openwrt.git openwrt
+
+      # 步骤五：动态缓存策略（如果是 clean 模式则直接跳过恢复，实现强行清空）
       - name: Restore Ccache & Toolchain Cache
         if: ${{ github.event.inputs.build_mode == 'fast' }}
         uses: actions/cache@v4
@@ -64,11 +69,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-openwrt-toolchain-${{ github.event.inputs.branch }}-
             ${{ runner.os }}-openwrt-toolchain-
-
-      # 步骤五：克隆源码
-      - name: Clone Source Code
-        run: |
-          git clone --depth 1 --single-branch -b ${{ github.event.inputs.branch }} https://github.com/openwrt/openwrt.git openwrt
 
       # 步骤六：更新和安装 Feeds
       - name: Update Feeds
