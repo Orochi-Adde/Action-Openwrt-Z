@@ -7,6 +7,14 @@ on:
         description: '选择编译分支 (主分支建议填 master)'
         required: true
         default: 'master'
+      build_mode:
+        description: '选择编译模式 (fast=极速缓存编译, clean=全新全量清空编译)'
+        required: true
+        default: 'fast'
+        type: choice
+        options:
+          - fast
+          - clean
 
 jobs:
   build:
@@ -43,14 +51,19 @@ jobs:
             pkg-config python3-dev subversion texinfo time u-boot-tools xsltproc xxd zstd
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      # 步骤四：配置 Ccache 缓存持久化
-      - name: Restore Ccache
+      # 步骤四：动态缓存策略（如果是 clean 模式则直接跳过恢复，实现强行清空）
+      - name: Restore Ccache & Toolchain Cache
+        if: ${{ github.event.inputs.build_mode == 'fast' }}
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ github.event.inputs.branch }}
+          path: |
+            ~/.ccache
+            openwrt/staging_dir/host
+            openwrt/staging_dir/toolchain-*
+          key: ${{ runner.os }}-openwrt-toolchain-${{ github.event.inputs.branch }}-${{ hashFiles('openwrt/include/version.mk') }}
           restore-keys: |
-            ${{ runner.os }}-ccache-
+            ${{ runner.os }}-openwrt-toolchain-${{ github.event.inputs.branch }}-
+            ${{ runner.os }}-openwrt-toolchain-
 
       # 步骤五：克隆源码
       - name: Clone Source Code
@@ -64,29 +77,24 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # 步骤七：加载自定义配置与 K2P 强制指向
-      - name: Apply Configuration & Set K2P Target
+      # 步骤七：加载 K2P 目标配置并执行自定义 diy.sh 脚本
+      - name: Apply Configuration & Run diy.sh
         run: |
           cd openwrt
           
-          # 如果你根目录下上传了 .config，优先使用它
-          if [ -f ../.config ]; then
-            cp ../.config .config
-            echo "发现仓库根目录的 .config 文件，已应用！"
-          else
-            echo "未发现 .config，正在自动写入 K2P (ramips/mt7621) 基础配置..."
-            echo "CONFIG_TARGET_ramips=y" >> .config
-            echo "CONFIG_TARGET_ramips_mt7621=y" >> .config
-            echo "CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y" >> .config
-          fi
+          # 写入 K2P (ramips/mt7621) 基础配置
+          echo "CONFIG_TARGET_ramips=y" >> .config
+          echo "CONFIG_TARGET_ramips_mt7621=y" >> .config
+          echo "CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y" >> .config
 
+          # 执行根目录下的 diy.sh 脚本（自动注入 LuCI 和 Wi-Fi 开启逻辑）
           if [ -f ../diy.sh ]; then
             chmod +x ../diy.sh
-            ../diy.sh .
+            ../diy.sh
             echo "diy.sh 执行完毕！"
           fi
 
-      # 步骤八：配置编译选项、初始化 Ccache 并多线程预下载
+      # 步骤八：配置编译选项并预下载
       - name: Download Package Dependencies & Configure
         run: |
           cd openwrt
@@ -110,18 +118,7 @@ jobs:
           echo "FILE_DATE=$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           make -j$(nproc)
 
-      # 步骤十：Debug 打印编译产物目录
-      - name: Debug - List Generated Files
-        run: |
-          echo "========== 正在打印编译产物目录结构 =========="
-          if [ -d "openwrt/bin/targets" ]; then
-            find openwrt/bin/targets/ -type f -exec ls -lh {} +
-          else
-            echo "警告：openwrt/bin/targets 目录不存在！"
-          fi
-          echo "=============================================="
-
-      # 步骤十一：打包上传 K2P 固件
+      # 步骤十：打包上传 K2P 固件
       - name: Organize And Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -131,4 +128,3 @@ jobs:
             openwrt/bin/targets/ramips/mt7621/*.img
             openwrt/bin/targets/ramips/mt7621/config.buildinfo
             openwrt/bin/targets/ramips/mt7621/profiles.json
-
